@@ -47,3 +47,10 @@ pub struct HomeTemplate {
     pub account: Option<String>,
     pub message: Option<String>,
 }
+
+#[derive(Template)]
+#[template(path = "admin.html")]
+pub struct AdminTemplate {
+    pub is_admin: bool,
+    pub message: Option<String>,
+}

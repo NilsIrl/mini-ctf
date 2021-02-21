@@ -1,6 +1,7 @@
 use actix_session::{CookieSession, Session};
 use actix_web::{get, http, middleware::Logger, post, web, App, Either, HttpResponse, HttpServer};
 use askama::Template;
+use block_modes::BlockMode;
 use futures_util::stream::StreamExt;
 use serde::Deserialize;
 use sqlx::{Executor, Row, SqlitePool};
@@ -9,7 +10,8 @@ use tokio::sync::RwLock;
 mod templates;
 
 use templates::{
-    HomeTemplate, Message, NotFoundTemplate, SearchTemplate, SecretTemplate, SignupPage,
+    AdminTemplate, HomeTemplate, Message, NotFoundTemplate, SearchTemplate, SecretTemplate,
+    SignupPage,
 };
 
 fn home_redirect() -> HttpResponse {
@@ -26,6 +28,85 @@ struct Search {
 pub struct User {
     id: u32,
     username: String,
+}
+
+async fn admin_check(session: Session, conn: web::Data<SqlitePool>) -> bool {
+    match session.get::<i32>("id").unwrap() {
+        Some(id) => {
+            if sqlx::query("SELECT null FROM user WHERE id = ? AND is_admin = 1")
+                .bind(id)
+                .fetch_optional(&**conn)
+                .await
+                .unwrap()
+                .is_some()
+            {
+                true
+            } else {
+                false
+            }
+        }
+        None => false,
+    }
+}
+
+type Aes256Cbc = block_modes::Cbc<aes::Aes256, block_modes::block_padding::Pkcs7>;
+
+#[derive(Deserialize)]
+struct Signature {
+    ciphertext: String,
+}
+
+#[post("/admin")]
+async fn admin_sign(
+    decrypt: web::Query<Signature>,
+    session: Session,
+    conn: web::Data<SqlitePool>,
+    secrets: web::Data<Flag>,
+) -> AdminTemplate {
+    if admin_check(session, conn).await {
+        AdminTemplate {
+            message: Some(
+                {
+                    match hex::decode(&decrypt.ciphertext) {
+                        Ok(mut ciphertext) => {
+                            let cipher = Aes256Cbc::new_var(
+                                &secrets.key.read().await.unwrap(),
+                                &ciphertext[..16],
+                            )
+                            .unwrap();
+                            match cipher.decrypt(&mut ciphertext[16..]) {
+                                Ok(_) => "Signature successfully set",
+                                Err(_) => "There was an error setting your signature",
+                            }
+                        }
+                        Err(_) => "Error decoding hex :(",
+                    }
+                }
+                .to_string(),
+            ),
+            is_admin: true,
+        }
+    } else {
+        AdminTemplate {
+            message: None,
+            is_admin: false,
+        }
+    }
+}
+
+#[get("/admin")]
+async fn admin_page(session: Session, conn: web::Data<SqlitePool>) -> AdminTemplate {
+    if admin_check(session, conn).await {
+        AdminTemplate {
+            message: None,
+            is_admin: true,
+        }
+    } else {
+        AdminTemplate {
+            message: None,
+            is_admin: false,
+        }
+    }
 }
 
 #[get("/search")]
@@ -132,21 +213,48 @@ async fn logout(session: Session) -> HttpResponse {
 
 struct Flag {
     flag1: RwLock<String>,
+    key: RwLock<Option<[u8; 32]>>,
 }
 
 #[derive(Deserialize)]
 struct Secret {
-    flag: String,
+    flag: Option<String>,
+    key: Option<String>,
 }
 
 #[get("/setsecret")]
 async fn setsecret(newflag: web::Query<Secret>, secretflag: web::Data<Flag>) -> HttpResponse {
-    HttpResponse::Ok().body(if secretflag.flag1.read().await.is_empty() {
-        *secretflag.flag1.write().await = newflag.flag.clone();
-        format!("Sucessfully set flag to: {}", secretflag.flag1.read().await)
-    } else {
-        "Flag already set".to_string()
-    })
+    let mut message = String::new();
+    if let Some(flag) = &newflag.flag {
+        if secretflag.flag1.read().await.is_empty() {
+            *secretflag.flag1.write().await = flag.to_string();
+            message.push_str(&format!("Set flag to {}", secretflag.flag1.read().await));
+        } else {
+            message.push_str("Flag already set.");
+        }
+    };
+
+    if let Some(key) = &newflag.key {
+        if secretflag.key.read().await.is_none() {
+            let mut bytes = [0u8; 32];
+            match hex::decode_to_slice(key, &mut bytes) {
+                Ok(()) => {
+                    *secretflag.key.write().await = Some(bytes);
+                    message.push_str(&format!(
+                        "Set key to {}",
+                        hex::encode(secretflag.key.read().await.unwrap())
+                    ));
+                }
+                Err(_) => {
+                    message.push_str("Error decoding key from hex.");
+                }
+            };
+        } else {
+            message.push_str("Key already set.");
+        }
+    };
+
+    HttpResponse::Ok().body(message)
 }
 
 #[get("/secret")]
@@ -255,6 +363,7 @@ async fn main() -> std::io::Result<()> {
             .data(conn.clone())
             .data(Flag {
                 flag1: RwLock::new(String::new()),
+                key: RwLock::new(None),
             })
             .wrap(CookieSession::signed(&[0; 32]).http_only(false))
             .wrap(Logger::default())
@@ -266,6 +375,8 @@ async fn main() -> std::io::Result<()> {
             .service(home_page)
             .service(new_message)
             .service(setsecret)
+            .service(admin_page)
+            .service(admin_sign)
             .route(
                 "/robots.txt",
                 web::get().to(|| {

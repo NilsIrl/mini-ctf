@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+<h2>ADMIN PAGE!!!</h2>
+
+{% include "message.html" %}
+
+{% if is_admin %}
+	<p>For additional security, we use military grade encryption to verify the
+	identity of admins. In addition to them being logged in. Enter your
+	signature to verify your identity:</p>
+	<form>
+		<label for="ciphertext">Signature (to very identity):</label>
+		<input name="ciphertext" type="text">
+		<input type="submit">
+	</form>
+{% else %}
+	<p>You need to be signed in as an admin in order to access this page.</p>
+{% endif %}
+
+{% endblock %}
