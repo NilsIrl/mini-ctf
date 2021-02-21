@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+{% include "message.html" %}
+
+{% if account.is_some() %}
+	<p>Logged in as {{ account.as_ref().unwrap() }}</p>
+	<p><a href="/logout">Logout</a></p>
+{% else %}
+	<p>Not logged in</p>
+	<p><a href="/users">Sign in/Sign up</a></p>
+{% endif %}
+
+<form method="post">
+	<input name="message" type="input" placeholder="Message" autofocus>
+	<input type="submit">
+</form>
+
+<ul>
+	{% for message in messages %}
+		<li>{{ message.author }}: {{ message.message }}</li>
+	{% endfor %}
+</ul>
+
+{% endblock %}

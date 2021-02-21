@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+
+{% block content %}
+	<h2>Search for a user</h2>
+
+	{% include "message.html" %}
+
+	<form>
+		<label for="username">Username: </label>
+		<input name="username" placeholder="Username" type="text">
+		<input type="submit">
+	</form>
+
+	{% if !users.is_empty() %}
+		<table>
+			<tr>
+				<th>id</th>
+				<th>username</th>
+			</tr>
+			{% for user in users %}
+				<tr>
+					<td>{{ user.id }}</td>
+					<td>{{ user.username.as_str() }}</td>
+				</tr>
+			{% endfor %}
+		</table>
+	{% endif %}
+{% endblock %}

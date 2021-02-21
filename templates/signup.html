@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block content %}
+
+{% include "message.html" %}
+
+<form method="post">
+	<label for="username">Username: </label>
+	<input name="username" type="text">
+	<label for="password">Password: </label>
+	<input name="password" type="password">
+	<input name="signin" type="submit" value="Sign in">
+	<input name="signup" type="submit" value="Sign up">
+</form>
+{% endblock %}
+
