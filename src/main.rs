@@ -1,5 +1,5 @@
 use actix_session::{CookieSession, Session};
-use actix_web::{get, http, post, web, App, Either, HttpResponse, HttpServer};
+use actix_web::{get, http, middleware::Logger, post, web, App, Either, HttpResponse, HttpServer};
 use askama::Template;
 use futures_util::stream::StreamExt;
 use serde::Deserialize;
@@ -28,7 +28,7 @@ pub struct User {
     username: String,
 }
 
-#[get("/users/search")]
+#[get("/search")]
 async fn search_users(search: web::Query<Search>, conn: web::Data<SqlitePool>) -> SearchTemplate {
     let mut message = None;
 
@@ -48,8 +48,14 @@ async fn search_users(search: web::Query<Search>, conn: web::Data<SqlitePool>) -
             })
             .iter()
             .map(|row| User {
-                id: row.get("id"),
-                username: row.get("username"),
+                id: row.try_get("id").unwrap_or_else(|err| {
+                    message = Some(err.to_string());
+                    0
+                }),
+                username: row.try_get("username").unwrap_or_else(|err| {
+                    message = Some(err.to_string());
+                    "".to_string()
+                }),
             })
             .collect(),
 
@@ -251,6 +257,7 @@ async fn main() -> std::io::Result<()> {
                 flag1: RwLock::new(String::new()),
             })
             .wrap(CookieSession::signed(&[0; 32]).http_only(false))
+            .wrap(Logger::default())
             .service(signup_page)
             .service(signup_request)
             .service(search_users)
@@ -259,6 +266,15 @@ async fn main() -> std::io::Result<()> {
             .service(home_page)
             .service(new_message)
             .service(setsecret)
+            .route(
+                "/robots.txt",
+                web::get().to(|| {
+                    HttpResponse::Ok().body(
+                        "User-agent: *
+Disallow: /secret",
+                    )
+                }),
+            )
             .default_service(web::to(|| {
                 HttpResponse::NotFound().body(NotFoundTemplate {}.render().unwrap())
             }))
