@@ -379,7 +379,13 @@ async fn main() -> std::io::Result<()> {
                 flag1: RwLock::new(String::new()),
                 key: RwLock::new(None),
             })
-            .wrap(CookieSession::signed(&[0; 32]).http_only(false))
+            .wrap(
+                CookieSession::signed(&[0; 32])
+                    // For XSS to work
+                    .http_only(false)
+                    // To be able to serve the website over non TLS channels
+                    .secure(false),
+            )
             .wrap(Logger::default())
             .service(signup_page)
             .service(signup_request)
