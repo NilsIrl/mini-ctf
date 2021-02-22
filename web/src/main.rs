@@ -56,49 +56,32 @@ struct Signature {
     ciphertext: String,
 }
 
-#[post("/admin")]
-async fn admin_sign(
-    decrypt: web::Query<Signature>,
+#[get("/admin")]
+async fn admin_page(
+    decrypt: Option<web::Query<Signature>>,
     session: Session,
     conn: web::Data<SqlitePool>,
     secrets: web::Data<Flag>,
-) -> AdminTemplate {
+) -> AdminTemplate<'static> {
     if admin_check(session, conn).await {
         AdminTemplate {
-            message: Some(
-                {
-                    match hex::decode(&decrypt.ciphertext) {
-                        Ok(mut ciphertext) => {
-                            let cipher = Aes256Cbc::new_var(
-                                &secrets.key.read().await.unwrap(),
-                                &ciphertext[..16],
-                            )
-                            .unwrap();
-                            match cipher.decrypt(&mut ciphertext[16..]) {
-                                Ok(_) => "Signature successfully set",
-                                Err(_) => "There was an error setting your signature",
-                            }
+            message: match decrypt {
+                Some(decrypt) => Some(match hex::decode(&decrypt.ciphertext) {
+                    Ok(mut ciphertext) => {
+                        let cipher = Aes256Cbc::new_var(
+                            &secrets.key.read().await.unwrap(),
+                            &ciphertext[..16],
+                        )
+                        .unwrap();
+                        match cipher.decrypt(&mut ciphertext[16..]) {
+                            Ok(_) => "Signature successfully set",
+                            Err(_) => "There was an error setting your signature",
                         }
-                        Err(_) => "Error decoding hex :(",
                     }
-                }
-                .to_string(),
-            ),
-            is_admin: true,
-        }
-    } else {
-        AdminTemplate {
-            message: None,
-            is_admin: false,
-        }
-    }
-}
-
-#[get("/admin")]
-async fn admin_page(session: Session, conn: web::Data<SqlitePool>) -> AdminTemplate {
-    if admin_check(session, conn).await {
-        AdminTemplate {
-            message: None,
+                    Err(_) => "Error decoding hex :(",
+                }),
+                None => None,
+            },
             is_admin: true,
         }
     } else {
@@ -220,10 +203,16 @@ struct Flag {
 struct Secret {
     flag: Option<String>,
     key: Option<String>,
+    password: Option<String>,
 }
 
+/// THIS FUNCTION IS FOR CTF MAINTAINANCE, THERE ARE NO INTENDED VULNERABILITIES HERE
 #[get("/setsecret")]
-async fn setsecret(newflag: web::Query<Secret>, secretflag: web::Data<Flag>) -> HttpResponse {
+async fn setsecret(
+    newflag: web::Query<Secret>,
+    secretflag: web::Data<Flag>,
+    conn: web::Data<SqlitePool>,
+) -> HttpResponse {
     let mut message = String::new();
     if let Some(flag) = &newflag.flag {
         if secretflag.flag1.read().await.is_empty() {
@@ -251,6 +240,30 @@ async fn setsecret(newflag: web::Query<Secret>, secretflag: web::Data<Flag>) -> 
             };
         } else {
             message.push_str("Key already set.");
+        }
+    };
+
+    if let Some(password) = &newflag.password {
+        if conn
+            .fetch_optional("SELECT null FROM user WHERE username = 'admin'")
+            .await
+            .unwrap()
+            .is_none()
+        {
+            sqlx::query("INSERT INTO user (username, password, is_admin) VALUES ('admin', ?, 1)")
+                .bind(password)
+                .execute(&**conn)
+                .await
+                .unwrap();
+            message.push_str(&format!(
+                "Set admin password to {}",
+                conn.fetch_one("SELECT password FROM user WHERE username = 'admin'")
+                    .await
+                    .unwrap()
+                    .get::<&str, &str>("password")
+            ));
+        } else {
+            message.push_str("Admin password already set.");
         }
     };
 
@@ -359,12 +372,6 @@ async fn main() -> std::io::Result<()> {
     .await
     .unwrap();
 
-    conn.execute(
-        "INSERT INTO user (username, password, is_admin) VALUES ('admin', 'flag{hunter2}', 1)",
-    )
-    .await
-    .unwrap();
-
     HttpServer::new(move || {
         App::new()
             .data(conn.clone())
@@ -383,7 +390,6 @@ async fn main() -> std::io::Result<()> {
             .service(new_message)
             .service(setsecret)
             .service(admin_page)
-            .service(admin_sign)
             .route(
                 "/robots.txt",
                 web::get().to(|| {

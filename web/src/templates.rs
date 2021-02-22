@@ -50,7 +50,7 @@ pub struct HomeTemplate {
 
 #[derive(Template)]
 #[template(path = "admin.html")]
-pub struct AdminTemplate {
+pub struct AdminTemplate<'a> {
     pub is_admin: bool,
-    pub message: Option<String>,
+    pub message: Option<&'a str>,
 }
