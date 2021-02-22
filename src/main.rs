@@ -4,7 +4,7 @@ use askama::Template;
 use block_modes::BlockMode;
 use futures_util::stream::StreamExt;
 use serde::Deserialize;
-use sqlx::{Executor, Row, SqlitePool};
+use sqlx::{sqlite::SqlitePoolOptions, Executor, Row, SqlitePool};
 use tokio::sync::RwLock;
 
 mod templates;
@@ -333,7 +333,14 @@ async fn new_message(
 async fn main() -> std::io::Result<()> {
     env_logger::init();
 
-    let conn = SqlitePool::connect("sqlite::memory:").await.unwrap();
+    let conn = SqlitePoolOptions::new()
+        .max_connections(1)
+        .idle_timeout(None)
+        .max_lifetime(None)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+
     conn.execute(
         "CREATE TABLE user (
         id INTEGER PRIMARY KEY,
