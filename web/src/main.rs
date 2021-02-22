@@ -68,12 +68,13 @@ async fn admin_page(
             message: match decrypt {
                 Some(decrypt) => Some(match hex::decode(&decrypt.ciphertext) {
                     Ok(mut ciphertext) => {
-                        let cipher = Aes256Cbc::new_var(
+                        match Aes256Cbc::new_var(
                             &secrets.key.read().await.unwrap(),
                             &ciphertext[..16],
                         )
-                        .unwrap();
-                        match cipher.decrypt(&mut ciphertext[16..]) {
+                        .unwrap()
+                        .decrypt(&mut ciphertext[16..])
+                        {
                             Ok(_) => "Signature successfully set",
                             Err(_) => "There was an error setting your signature",
                         }
@@ -372,13 +373,15 @@ async fn main() -> std::io::Result<()> {
     .await
     .unwrap();
 
+    let flag = web::Data::new(Flag {
+        flag1: RwLock::new(String::new()),
+        key: RwLock::new(None),
+    });
+
     HttpServer::new(move || {
         App::new()
+            .app_data(flag.clone())
             .data(conn.clone())
-            .data(Flag {
-                flag1: RwLock::new(String::new()),
-                key: RwLock::new(None),
-            })
             .wrap(
                 CookieSession::signed(&[0; 32])
                     // For XSS to work
